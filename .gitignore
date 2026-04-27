@@ -1,0 +1,9 @@
+# User-uploaded files (ID documents, certificates — never commit)
+uploads/
+
+# Claude Code config
+.claude/
+
+# Local environment overrides
+.env
+*.local.php
