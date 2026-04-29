@@ -40,6 +40,14 @@ $payMethodLabels = [
 ];
 $payLabel = $payMethodLabels[$booking['payment_method']] ?? $booking['payment_method'];
 
+// Payment breakdown (card / mobile_money only — no row for cash)
+$payoutRow = null;
+try {
+    $stmt = $pdo->prepare("SELECT * FROM provider_payouts WHERE booking_id = ? LIMIT 1");
+    $stmt->execute([$booking_id]);
+    $payoutRow = $stmt->fetch() ?: null;
+} catch (Throwable $e) {}
+
 // Check if user already reviewed this booking's provider
 $stmt = $pdo->prepare("SELECT review_id FROM reviews WHERE booking_id = ? AND user_id = ?");
 $stmt->execute([$booking_id, getUserId()]);
@@ -159,6 +167,17 @@ unset($_SESSION['success'], $_SESSION['errors']);
         <span class="lbl">Total Paid</span>
         <span class="amt">GH₵ <?= number_format($totalAmount, 2) ?></span>
       </div>
+
+      <?php if ($payoutRow): ?>
+      <hr class="receipt-divider">
+      <div style="margin-bottom:8px;">
+        <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--sand);margin-bottom:10px;">Payment Breakdown</p>
+        <div class="receipt-row"><span>Gross Collected</span><span>GH₵ <?= number_format($payoutRow['gross_amount'], 2) ?></span></div>
+        <div class="receipt-row"><span>Platform Commission (10%)</span><span>GH₵ <?= number_format($payoutRow['commission_amount'], 2) ?></span></div>
+        <div class="receipt-row"><span>Tax Held for GRA (20%)</span><span>GH₵ <?= number_format($payoutRow['tax_amount'], 2) ?></span></div>
+        <div class="receipt-row" style="font-weight:700;color:var(--ember-dk);"><span>Provider Payout</span><span>GH₵ <?= number_format($payoutRow['payout_amount'], 2) ?></span></div>
+      </div>
+      <?php endif; ?>
 
       <div class="receipt-footer">
         <p>QuickHire — Connecting Ghana, one job at a time.</p>

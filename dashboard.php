@@ -145,7 +145,7 @@ if (isProvider()) {
         $totalOwed = 0;
         try {
             $stmt = $pdo->prepare("
-                SELECT pc.*, s.service_name, u.full_name AS customer_name 
+                SELECT pc.*, s.service_name, u.full_name AS customer_name
                 FROM provider_commissions pc
                 JOIN bookings b ON pc.booking_id = b.booking_id
                 JOIN users u ON b.user_id = u.user_id
@@ -160,6 +160,36 @@ if (isProvider()) {
         } catch (Exception $e) {
             // Table may not exist yet
         }
+
+        // Provider payouts (card / mobile_money earnings)
+        $payoutStats    = ['all_time' => 0.0, 'month' => 0.0, 'week' => 0.0];
+        $providerPayouts = [];
+        try {
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(payout_amount),0) FROM provider_payouts WHERE provider_id=? AND status='released'");
+            $stmt->execute([$provider_id]);
+            $payoutStats['all_time'] = (float)$stmt->fetchColumn();
+
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(payout_amount),0) FROM provider_payouts WHERE provider_id=? AND status='released' AND DATE_FORMAT(created_at,'%Y-%m')=DATE_FORMAT(CURDATE(),'%Y-%m')");
+            $stmt->execute([$provider_id]);
+            $payoutStats['month'] = (float)$stmt->fetchColumn();
+
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(payout_amount),0) FROM provider_payouts WHERE provider_id=? AND status='released' AND YEARWEEK(created_at,1)=YEARWEEK(CURDATE(),1)");
+            $stmt->execute([$provider_id]);
+            $payoutStats['week'] = (float)$stmt->fetchColumn();
+
+            $stmt = $pdo->prepare("
+                SELECT pp.*, s.service_name, u.full_name AS customer_name
+                FROM provider_payouts pp
+                JOIN bookings b ON pp.booking_id = b.booking_id
+                JOIN users u ON b.user_id = u.user_id
+                LEFT JOIN services s ON b.service_id = s.service_id
+                WHERE pp.provider_id = ? AND pp.status = 'released'
+                ORDER BY pp.created_at DESC
+                LIMIT 30
+            ");
+            $stmt->execute([$provider_id]);
+            $providerPayouts = $stmt->fetchAll();
+        } catch (Exception $e) {}
     }
 }
 
@@ -349,7 +379,7 @@ $msgCount = getUnreadMessages($pdo, $user_id);
       </a>
       <?php endif; ?>
       <a class="dash-nav-item" id="nav-payments" onclick="showPanel('payments', this)">
-        <span class="dash-nav-icon">💳</span> Payments
+        <span class="dash-nav-icon">💳</span> <?= isProvider() ? 'Payments & Earnings' : 'Payments' ?>
       </a>
       <?php if (isProvider()): ?>
       <a class="dash-nav-item" id="nav-provider-bookings" onclick="showPanel('provider-bookings', this)">
@@ -609,8 +639,59 @@ $msgCount = getUnreadMessages($pdo, $user_id);
       <?php endif; ?>
 
       <div id="payments" class="dash-panel">
-        <h2 class="dash-panel-title">Payments & Receipts</h2>
-        <p class="dash-panel-sub">View your payment history and download receipts.</p>
+        <h2 class="dash-panel-title"><?= isProvider() ? 'Payments & Earnings' : 'Payments & Receipts' ?></h2>
+        <p class="dash-panel-sub"><?= isProvider() ? 'Your payout history, commission summary, and payment receipts.' : 'View your payment history and download receipts.' ?></p>
+
+        <?php if (isProvider()): ?>
+        <!-- Earnings strip (provider only) -->
+        <div class="dash-stats" style="margin-bottom:24px;">
+          <div class="dash-stat">
+            <span class="num" style="font-size:1.2rem;color:var(--ember);">GH&#x20B5; <?= number_format($payoutStats['all_time'], 2) ?></span>
+            <span class="lbl">Total Earned (All Time)</span>
+          </div>
+          <div class="dash-stat">
+            <span class="num" style="font-size:1.2rem;color:var(--ember);">GH&#x20B5; <?= number_format($payoutStats['month'], 2) ?></span>
+            <span class="lbl">This Month</span>
+          </div>
+          <div class="dash-stat">
+            <span class="num" style="font-size:1.2rem;color:var(--ember);">GH&#x20B5; <?= number_format($payoutStats['week'], 2) ?></span>
+            <span class="lbl">This Week</span>
+          </div>
+        </div>
+
+        <?php if (!empty($providerPayouts)): ?>
+        <div class="profile-section">
+          <h3>Payout History (Card &amp; Mobile Money)</h3>
+          <table class="bookings-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Booking #</th><th>Service</th><th>Customer</th>
+                <th>Gross</th><th>Commission</th><th>Tax</th><th>Payout</th><th>Method</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($providerPayouts as $pp): ?>
+              <tr>
+                <td style="white-space:nowrap;font-size:0.8rem;"><?= date('j M Y', strtotime($pp['created_at'])) ?></td>
+                <td>#QH-<?= str_pad($pp['booking_id'], 4, '0', STR_PAD_LEFT) ?></td>
+                <td><?= htmlspecialchars($pp['service_name'] ?? 'Service') ?></td>
+                <td><?= htmlspecialchars($pp['customer_name']) ?></td>
+                <td>GH&#x20B5; <?= number_format($pp['gross_amount'], 2) ?></td>
+                <td>GH&#x20B5; <?= number_format($pp['commission_amount'], 2) ?></td>
+                <td>GH&#x20B5; <?= number_format($pp['tax_amount'], 2) ?></td>
+                <td style="font-weight:700;color:var(--ember-dk);">GH&#x20B5; <?= number_format($pp['payout_amount'], 2) ?></td>
+                <td><?= ucwords(str_replace('_', ' ', $pp['payment_method'])) ?></td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+        <?php else: ?>
+        <div class="profile-section">
+          <p style="color:var(--sand);font-size:0.9rem;">No payouts yet. Earnings appear here automatically when customers pay via card or Mobile Money.</p>
+        </div>
+        <?php endif; ?>
+        <?php endif; ?>
 
         <?php if (empty($payments)): ?>
           <div class="profile-section"><p>No payments yet.</p></div>

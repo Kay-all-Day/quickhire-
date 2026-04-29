@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once 'includes/db.php';
 require_once 'includes/auth.php';
 require_once 'includes/smileid.php';
@@ -51,10 +51,25 @@ $featuredCount = $stmt->fetch()['total'];
 $stmt = $pdo->query("SELECT COALESCE(SUM(fee), 0) as total FROM featured_requests WHERE payment_status = 'completed'");
 $featuredRevenue = $stmt->fetch()['total'];
 
-// ══════════ ALL USERS ══════════
-// ══════════ HOMEPAGE CATEGORIES ══════════
-$stmt = $pdo->query("SELECT * FROM homepage_categories ORDER BY display_order ASC");
-$homepageCategories = $stmt->fetchAll();
+// Payout system stats
+$totalCommissionEarned = 0;
+$totalPayoutsReleased  = 0;
+$totalTaxHeld          = 0;
+try {
+    $stmt = $pdo->query("SELECT COALESCE(SUM(commission_amount),0) FROM provider_payouts WHERE status='released'");
+    $payoutCommission = (float)$stmt->fetchColumn();
+
+    $stmt = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM provider_commissions WHERE status='paid'");
+    $cashCommissionPaid = (float)$stmt->fetchColumn();
+
+    $totalCommissionEarned = round($payoutCommission + $cashCommissionPaid, 2);
+
+    $stmt = $pdo->query("SELECT COALESCE(SUM(payout_amount),0) FROM provider_payouts WHERE status='released'");
+    $totalPayoutsReleased = (float)$stmt->fetchColumn();
+
+    $stmt = $pdo->query("SELECT COALESCE(SUM(tax_amount),0) FROM provider_payouts WHERE status='released'");
+    $totalTaxHeld = (float)$stmt->fetchColumn();
+} catch (Throwable $e) {}
 
 // ══════════ FEATURED REQUESTS ══════════
 $stmt = $pdo->query("
@@ -84,14 +99,6 @@ foreach ($verificationRequests as $vr) {
     if ($vr['status'] === 'pending') $pendingVerificationCount++;
 }
 
-$stmt = $pdo->query("
-    SELECT u.*, 
-           (SELECT COUNT(*) FROM bookings WHERE user_id = u.user_id) as booking_count
-    FROM users u 
-    ORDER BY u.created_at DESC
-");
-$allUsers = $stmt->fetchAll();
-
 // ══════════ ALL PROVIDERS ══════════
 $stmt = $pdo->query("
     SELECT sp.*, u.full_name, u.email, u.phone,
@@ -102,6 +109,35 @@ $stmt = $pdo->query("
     ORDER BY sp.rating DESC
 ");
 $allProviders = $stmt->fetchAll();
+
+// ══════════ PROVIDER EARNINGS ══════════
+$stmt = $pdo->query("
+    SELECT u.full_name, sp.provider_id, sp.service_category, sp.rating, sp.is_featured, sp.is_verified,
+           COUNT(b.booking_id) as total_jobs,
+           COALESCE(SUM(CASE WHEN p.payment_status = 'completed' THEN p.amount ELSE 0 END), 0) as gross_earned,
+           COALESCE(SUM(CASE WHEN p.payment_status = 'completed' THEN p.amount * $commissionRate ELSE 0 END), 0) as commission_paid,
+           COALESCE(SUM(CASE WHEN p.payment_status = 'completed' THEN p.amount * (1 - $commissionRate) ELSE 0 END), 0) as net_earned
+    FROM service_providers sp
+    JOIN users u ON sp.user_id = u.user_id
+    LEFT JOIN bookings b ON b.provider_id = sp.provider_id
+    LEFT JOIN payments p ON p.booking_id = b.booking_id
+    GROUP BY sp.provider_id
+    ORDER BY gross_earned DESC
+");
+$providerEarnings = $stmt->fetchAll();
+
+// ══════════ ALL USERS ══════════
+// ══════════ HOMEPAGE CATEGORIES ══════════
+$stmt = $pdo->query("SELECT * FROM homepage_categories ORDER BY display_order ASC");
+$homepageCategories = $stmt->fetchAll();
+
+$stmt = $pdo->query("
+    SELECT u.*, 
+           (SELECT COUNT(*) FROM bookings WHERE user_id = u.user_id) as booking_count
+    FROM users u 
+    ORDER BY u.created_at DESC
+");
+$allUsers = $stmt->fetchAll();
 
 // ══════════ RECENT BOOKINGS ══════════
 $stmt = $pdo->query("
@@ -119,22 +155,6 @@ $stmt = $pdo->query("
     LIMIT 20
 ");
 $recentBookings = $stmt->fetchAll();
-
-// ══════════ PROVIDER EARNINGS ══════════
-$stmt = $pdo->query("
-    SELECT u.full_name, sp.provider_id, sp.service_category, sp.rating, sp.is_featured, sp.is_verified,
-           COUNT(b.booking_id) as total_jobs,
-           COALESCE(SUM(CASE WHEN p.payment_status = 'completed' THEN p.amount ELSE 0 END), 0) as gross_earned,
-           COALESCE(SUM(CASE WHEN p.payment_status = 'completed' THEN p.amount * $commissionRate ELSE 0 END), 0) as commission_paid,
-           COALESCE(SUM(CASE WHEN p.payment_status = 'completed' THEN p.amount * (1 - $commissionRate) ELSE 0 END), 0) as net_earned
-    FROM service_providers sp
-    JOIN users u ON sp.user_id = u.user_id
-    LEFT JOIN bookings b ON b.provider_id = sp.provider_id
-    LEFT JOIN payments p ON p.booking_id = b.booking_id
-    GROUP BY sp.provider_id
-    ORDER BY gross_earned DESC
-");
-$providerEarnings = $stmt->fetchAll();
 
 // Monthly revenue (last 6 months)
 $stmt = $pdo->query("
@@ -367,16 +387,12 @@ try {
       <div class="admin-nav">
         <a class="active" onclick="showAdmin('overview', this)">📊 Overview</a>
         <a onclick="showAdmin('users', this)">👥 Users</a>
-        <a onclick="showAdmin('providers', this)">🛠 Providers</a>
         <a onclick="showAdmin('bookings-admin', this)">📅 Bookings</a>
         <a onclick="showAdmin('revenue', this)">💰 Revenue</a>
         <a onclick="showAdmin('analytics', this)">📈 Analytics</a>
-        <a onclick="showAdmin('featured', this)">⭐ Featured</a>
-        <a onclick="showAdmin('featured-requests', this)">🌟 Requests<?php if ($pendingFeaturedCount > 0): ?> <span class="nav-badge" id="badge-featured"><?= $pendingFeaturedCount ?></span><?php endif; ?></a>
-        <a onclick="showAdmin('verification-admin', this)">✅ Verification<?php if ($pendingVerificationCount > 0): ?> <span class="nav-badge" id="badge-verification"><?= $pendingVerificationCount ?></span><?php endif; ?></a>
         <a onclick="showAdmin('categories-admin', this)">📦 Categories</a>
         <a onclick="showAdmin('feedback-admin', this)">📝 Feedback<?php if ($pendingFeedbackCount > 0): ?> <span class="nav-badge" id="badge-feedback"><?= $pendingFeedbackCount ?></span><?php endif; ?></a>
-        <a href="admin_partners.php">🤝 Partners</a>
+        <a href="admin_partners.php" style="color:var(--ember)!important;border-left-color:var(--ember)!important;">🤝 Partners & Providers</a>
       </div>
     </aside>
 
@@ -392,23 +408,57 @@ try {
       <!-- ════ OVERVIEW ════ -->
       <div id="overview" class="admin-panel active">
         <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:900;letter-spacing:-0.05em;margin-bottom:6px;">Admin Dashboard</h2>
-        <p style="color:var(--sand);margin-bottom:36px;">Platform overview and key metrics.</p>
+        <p style="color:var(--sand);margin-bottom:32px;"><?= date('l, j F Y') ?></p>
 
-        <div class="stat-grid">
-          <div class="stat-card"><span class="num"><?= $totalUsers ?></span><span class="lbl">Total Users</span></div>
-          <div class="stat-card"><span class="num"><?= $totalCustomers ?></span><span class="lbl">Customers</span></div>
-          <div class="stat-card"><span class="num"><?= $totalProviders ?></span><span class="lbl">Providers</span></div>
-          <div class="stat-card"><span class="num"><?= $totalBookings ?></span><span class="lbl">Total Bookings</span></div>
-          <div class="stat-card"><span class="num"><?= $pendingBookings ?></span><span class="lbl">Pending</span></div>
-          <div class="stat-card"><span class="num"><?= $completedBookings ?></span><span class="lbl">Completed</span></div>
-          <div class="stat-card highlight"><span class="num">GH₵ <?= number_format($totalRevenue, 0) ?></span><span class="lbl">Total Revenue</span></div>
-          <div class="stat-card highlight"><span class="num">GH₵ <?= number_format($platformCommission, 0) ?></span><span class="lbl">Commission (<?= $commissionRate * 100 ?>%)</span></div>
-          <div class="stat-card"><span class="num"><?= $featuredCount ?></span><span class="lbl">Featured Providers</span></div>
-          <div class="stat-card"><span class="num">GH₵ <?= number_format($pendingPayments, 0) ?></span><span class="lbl">Pending Payments</span></div>
-          <div class="stat-card highlight"><span class="num">GH₵ <?= number_format($featuredRevenue, 0) ?></span><span class="lbl">Featured Listing Revenue</span></div>
-          <div class="stat-card highlight"><span class="num">GH₵ <?= number_format($platformCommission + $featuredRevenue, 0) ?></span><span class="lbl">Total QuickHire Income</span></div>
+        <!-- Primary KPIs -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;">
+          <div class="stat-card">
+            <span class="num"><?= $totalUsers ?></span>
+            <span class="lbl">Total Users</span>
+            <span style="font-size:0.72rem;color:var(--sand);margin-top:6px;display:block;"><?= $totalCustomers ?> customers · <?= $totalProviders ?> providers</span>
+          </div>
+          <div class="stat-card">
+            <span class="num"><?= $totalBookings ?></span>
+            <span class="lbl">Total Bookings</span>
+            <span style="font-size:0.72rem;color:var(--sand);margin-top:6px;display:block;"><?= $completedBookings ?> completed · <?= $pendingBookings ?> pending</span>
+          </div>
+          <div class="stat-card highlight">
+            <span class="num" style="font-size:1.4rem;">GH₵ <?= number_format($totalRevenue, 0) ?></span>
+            <span class="lbl">Gross Revenue</span>
+          </div>
+          <div class="stat-card highlight">
+            <span class="num" style="font-size:1.4rem;">GH₵ <?= number_format($platformCommission + $featuredRevenue, 0) ?></span>
+            <span class="lbl">Platform Income</span>
+            <span style="font-size:0.72rem;color:rgba(245,240,232,0.5);margin-top:6px;display:block;">Commission + featured listings</span>
+          </div>
         </div>
 
+        <!-- Attention strip (only shows items that need action) -->
+        <?php $needsAttention = $pendingBookings > 0 || $pendingVerificationCount > 0 || $pendingFeaturedCount > 0; ?>
+        <?php if ($needsAttention): ?>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px;">
+          <?php if ($pendingBookings > 0): ?>
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:10px;cursor:pointer;" onclick="showAdmin('bookings-admin', document.querySelector('.admin-nav a[onclick*=\'bookings-admin\']'))">
+            <span style="font-size:1rem;">📅</span>
+            <div><p style="font-size:0.82rem;font-weight:700;color:#92400e;"><?= $pendingBookings ?> pending booking<?= $pendingBookings > 1 ? 's' : '' ?></p><p style="font-size:0.7rem;color:#b45309;">Review in Bookings →</p></div>
+          </div>
+          <?php endif; ?>
+          <?php if ($pendingVerificationCount > 0): ?>
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;background:#dbeafe;border:1.5px solid #93c5fd;border-radius:10px;cursor:pointer;" onclick="location.href='admin_partners.php#verification'">
+            <span style="font-size:1rem;">✅</span>
+            <div><p style="font-size:0.82rem;font-weight:700;color:#1e40af;"><?= $pendingVerificationCount ?> verification<?= $pendingVerificationCount > 1 ? 's' : '' ?> pending</p><p style="font-size:0.7rem;color:#2563eb;">Review in Partners →</p></div>
+          </div>
+          <?php endif; ?>
+          <?php if ($pendingFeaturedCount > 0): ?>
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;background:#fef3c7;border:1.5px solid #fcd34d;border-radius:10px;cursor:pointer;" onclick="location.href='admin_partners.php#featured-requests'">
+            <span style="font-size:1rem;">⭐</span>
+            <div><p style="font-size:0.82rem;font-weight:700;color:#92400e;"><?= $pendingFeaturedCount ?> featured request<?= $pendingFeaturedCount > 1 ? 's' : '' ?></p><p style="font-size:0.7rem;color:#b45309;">Review in Partners →</p></div>
+          </div>
+          <?php endif; ?>
+        </div>
+        <?php endif; ?>
+
+        <!-- Monthly Revenue chart -->
         <?php if (!empty($monthlyRevenue)): ?>
         <div class="section-card">
           <h3>Monthly Revenue</h3>
@@ -491,65 +541,6 @@ try {
         </div>
       </div>
 
-      <!-- ════ PROVIDERS ════ -->
-      <div id="providers" class="admin-panel">
-        <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:900;letter-spacing:-0.05em;margin-bottom:6px;">Provider Management</h2>
-        <p style="color:var(--sand);margin-bottom:36px;"><?= count($allProviders) ?> service providers.</p>
-
-        <div class="section-card">
-          <table class="data-table">
-            <thead>
-              <tr><th>Provider</th><th>Category</th><th>Rating</th><th>Jobs</th><th>Earned</th><th>Verified</th><th>Featured</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              <?php foreach ($allProviders as $p): ?>
-              <tr>
-                <td style="font-weight:600;color:var(--bark);"><?= htmlspecialchars($p['full_name']) ?></td>
-                <td><?= htmlspecialchars($p['service_category']) ?></td>
-                <td>★ <?= number_format($p['rating'], 1) ?></td>
-                <td><?= $p['job_count'] ?></td>
-                <td>GH₵ <?= number_format($p['total_earned'], 0) ?></td>
-                <td>
-                  <form action="admin_action.php" method="POST" style="display:inline;">
-                    <input type="hidden" name="action" value="toggle_verified">
-                    <input type="hidden" name="provider_id" value="<?= $p['provider_id'] ?>">
-                    <button type="submit" class="toggle-btn <?= $p['is_verified'] ? 'toggle-on' : 'toggle-off' ?>"><?= $p['is_verified'] ? '✓ Verified' : 'Verify' ?></button>
-                  </form>
-                </td>
-                <td>
-                  <form action="admin_action.php" method="POST" style="display:inline;">
-                    <input type="hidden" name="action" value="toggle_featured">
-                    <input type="hidden" name="provider_id" value="<?= $p['provider_id'] ?>">
-                    <button type="submit" class="toggle-btn <?= $p['is_featured'] ? 'toggle-on' : 'toggle-off' ?>"><?= $p['is_featured'] ? '★ Featured' : 'Feature' ?></button>
-                  </form>
-                </td>
-                <td>
-                  <button class="toggle-btn toggle-off" onclick="toggleEditProvider(<?= $p['provider_id'] ?>)">Edit</button>
-                </td>
-              </tr>
-              <!-- Edit row -->
-              <tr id="edit-provider-<?= $p['provider_id'] ?>" style="display:none;background:var(--parchment);">
-                <td colspan="8">
-                  <form action="admin_action.php" method="POST" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 0;">
-                    <input type="hidden" name="action" value="update_provider">
-                    <input type="hidden" name="provider_id" value="<?= $p['provider_id'] ?>">
-                    <input type="text" name="service_category" value="<?= htmlspecialchars($p['service_category']) ?>" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem;width:140px;" placeholder="Category">
-                    <input type="number" name="experience_years" value="<?= $p['experience_years'] ?>" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem;width:60px;" placeholder="Yrs" min="0">
-                    <input type="text" name="availability" value="<?= htmlspecialchars($p['availability'] ?? '') ?>" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem;width:120px;" placeholder="Availability">
-                    <input type="text" name="languages" value="<?= htmlspecialchars($p['languages'] ?? '') ?>" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem;width:140px;" placeholder="Languages">
-                    <input type="text" name="avg_response" value="<?= htmlspecialchars($p['avg_response'] ?? '') ?>" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem;width:80px;" placeholder="e.g. 2hr">
-                    <input type="text" name="bio" value="<?= htmlspecialchars($p['bio'] ?? '') ?>" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem;flex:1;min-width:200px;" placeholder="Bio">
-                    <button type="submit" class="toggle-btn toggle-on">Save</button>
-                    <button type="button" class="toggle-btn toggle-off" onclick="toggleEditProvider(<?= $p['provider_id'] ?>)">Cancel</button>
-                  </form>
-                </td>
-              </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       <!-- ════ BOOKINGS ════ -->
       <div id="bookings-admin" class="admin-panel">
         <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:900;letter-spacing:-0.05em;margin-bottom:6px;">All Bookings</h2>
@@ -621,29 +612,8 @@ try {
           <div class="stat-card"><span class="num">GH₵ <?= number_format($pendingPayments, 2) ?></span><span class="lbl">Pending Collection</span></div>
         </div>
 
-        <div class="section-card">
-          <h3>Provider Earnings Breakdown</h3>
-          <table class="data-table">
-            <thead>
-              <tr><th>Provider</th><th>Category</th><th>Jobs</th><th>Gross Earned</th><th>Commission (<?= $commissionRate * 100 ?>%)</th><th>Net Payout</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              <?php foreach ($providerEarnings as $pe): ?>
-              <tr>
-                <td style="font-weight:600;color:var(--bark);"><?= htmlspecialchars($pe['full_name']) ?></td>
-                <td><?= htmlspecialchars($pe['service_category']) ?></td>
-                <td><?= $pe['total_jobs'] ?></td>
-                <td>GH₵ <?= number_format($pe['gross_earned'], 2) ?></td>
-                <td style="color:var(--ember);font-weight:600;">GH₵ <?= number_format($pe['commission_paid'], 2) ?></td>
-                <td style="font-weight:700;">GH₵ <?= number_format($pe['net_earned'], 2) ?></td>
-                <td>
-                  <?php if ($pe['is_featured']): ?><span class="status-badge status-pending">★ Featured</span><?php endif; ?>
-                  <?php if ($pe['is_verified']): ?><span class="status-badge status-accepted">✓ Verified</span><?php endif; ?>
-                </td>
-              </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+        <div class="section-card" style="border-left:3px solid var(--ember);">
+          <p style="font-size:0.9rem;color:var(--warm-mid);">For the full per-provider earnings breakdown, see <a href="admin_partners.php#revenue" style="color:var(--ember);font-weight:700;">Providers &amp; Partners → Revenue →</a></p>
         </div>
 
         <div class="section-card">
@@ -665,8 +635,15 @@ try {
 
       <!-- ════ ANALYTICS ════ -->
       <div id="analytics" class="admin-panel">
-        <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:800;letter-spacing:-0.04em;margin-bottom:6px;">Business Analytics</h2>
-        <p style="color:var(--sand);margin-bottom:36px;">Data-driven insights to help you make better business decisions.</p>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:36px;">
+          <div>
+            <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:800;letter-spacing:-0.04em;margin-bottom:6px;">Business Analytics</h2>
+            <p style="color:var(--sand);">Data-driven insights to help you make better business decisions.</p>
+          </div>
+          <a href="export_csv.php?type=analytics" style="white-space:nowrap;display:inline-flex;align-items:center;gap:7px;padding:10px 18px;font-size:0.82rem;font-weight:700;background:var(--ember);color:#fff;border:none;border-radius:8px;cursor:pointer;letter-spacing:0.03em;text-transform:uppercase;text-decoration:none;">
+            ↓ Export CSV
+          </a>
+        </div>
 
         <!-- KPI Cards -->
         <div class="stat-grid">
@@ -897,288 +874,6 @@ try {
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- ════ FEATURED ════ -->
-      <div id="featured" class="admin-panel">
-        <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:900;letter-spacing:-0.05em;margin-bottom:6px;">Featured Providers</h2>
-        <p style="color:var(--sand);margin-bottom:36px;">Manage which providers appear on the homepage.</p>
-
-        <div class="section-card">
-          <h3>Currently Featured (<?= $featuredCount ?>)</h3>
-          <?php $featuredProviders = array_filter($allProviders, fn($p) => $p['is_featured']); ?>
-          <?php if (empty($featuredProviders)): ?>
-            <p>No featured providers. Use the toggle below to feature providers.</p>
-          <?php else: ?>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:24px;">
-            <?php foreach ($featuredProviders as $fp):
-              $fpInitials = '';
-              foreach (explode(' ', $fp['full_name']) as $part) $fpInitials .= strtoupper(substr($part, 0, 1));
-            ?>
-            <div style="background:var(--parchment);border:1px solid var(--border);border-radius:10px;padding:20px;display:flex;gap:14px;align-items:center;">
-              <div style="width:46px;height:46px;border-radius:50%;background:var(--ember);color:#fff;font-family:'Sora',sans-serif;font-weight:700;font-size:0.95rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><?= $fpInitials ?></div>
-              <div>
-                <p style="font-weight:700;color:var(--bark);"><?= htmlspecialchars($fp['full_name']) ?></p>
-                <p style="font-size:0.8rem;color:var(--ember);font-weight:600;"><?= htmlspecialchars($fp['service_category']) ?> · ★ <?= number_format($fp['rating'], 1) ?></p>
-              </div>
-              <form action="admin_action.php" method="POST" style="margin-left:auto;">
-                <input type="hidden" name="action" value="toggle_featured">
-                <input type="hidden" name="provider_id" value="<?= $fp['provider_id'] ?>">
-                <button type="submit" class="toggle-btn toggle-on">Remove ✗</button>
-              </form>
-            </div>
-            <?php endforeach; ?>
-          </div>
-          <?php endif; ?>
-        </div>
-
-        <div class="section-card">
-          <h3>All Providers</h3>
-          <p style="color:var(--sand);font-size:0.88rem;margin-bottom:16px;">Click "Feature" to add a provider to the homepage.</p>
-          <table class="data-table">
-            <thead>
-              <tr><th>Provider</th><th>Category</th><th>Rating</th><th>Jobs</th><th>Verified</th><th>Featured</th></tr>
-            </thead>
-            <tbody>
-              <?php foreach ($allProviders as $p): ?>
-              <tr>
-                <td style="font-weight:600;color:var(--bark);"><?= htmlspecialchars($p['full_name']) ?></td>
-                <td><?= htmlspecialchars($p['service_category']) ?></td>
-                <td>★ <?= number_format($p['rating'], 1) ?></td>
-                <td><?= $p['job_count'] ?></td>
-                <td><?= $p['is_verified'] ? '✓' : '—' ?></td>
-                <td>
-                  <form action="admin_action.php" method="POST" style="display:inline;">
-                    <input type="hidden" name="action" value="toggle_featured">
-                    <input type="hidden" name="provider_id" value="<?= $p['provider_id'] ?>">
-                    <button type="submit" class="toggle-btn <?= $p['is_featured'] ? 'toggle-on' : 'toggle-off' ?>">
-                      <?= $p['is_featured'] ? '★ Featured' : 'Feature' ?>
-                    </button>
-                  </form>
-                </td>
-              </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ════ FEATURED REQUESTS ════ -->
-      <div id="featured-requests" class="admin-panel">
-        <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:800;letter-spacing:-0.04em;margin-bottom:6px;">Featured Listing Requests</h2>
-        <p style="color:var(--sand);margin-bottom:36px;">Providers pay to be featured on the homepage. Review and approve their requests.</p>
-
-        <?php
-        $paidPending = array_filter($featuredRequests, fn($r) => $r['request_status'] === 'pending' && $r['payment_status'] === 'completed');
-        $unpaidPending = array_filter($featuredRequests, fn($r) => $r['request_status'] === 'pending' && $r['payment_status'] === 'pending');
-        $processed = array_filter($featuredRequests, fn($r) => in_array($r['request_status'], ['approved', 'rejected', 'expired']));
-        ?>
-
-        <?php if (!empty($paidPending)): ?>
-        <div class="section-card" style="border-left:3px solid var(--ember);">
-          <h3>⏳ Awaiting Approval (<?= count($paidPending) ?> paid)</h3>
-          <?php foreach ($paidPending as $fr): ?>
-          <div style="background:var(--cream);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
-            <div>
-              <p style="font-weight:700;color:var(--bark);"><?= htmlspecialchars($fr['full_name']) ?></p>
-              <p style="font-size:0.82rem;color:var(--ember);font-weight:600;"><?= htmlspecialchars($fr['service_category']) ?> · ★ <?= number_format($fr['rating'], 1) ?></p>
-              <p style="font-size:0.8rem;color:var(--sand);margin-top:4px;"><?= $fr['duration_days'] ?> days · GH₵ <?= number_format($fr['fee'], 2) ?> · Paid via <?= ucwords(str_replace('_', ' ', $fr['payment_method'] ?? 'N/A')) ?></p>
-              <p style="font-size:0.75rem;color:var(--sand);">Requested: <?= date('j M Y, g:i A', strtotime($fr['created_at'])) ?></p>
-            </div>
-            <div style="display:flex;gap:8px;">
-              <form action="admin_action.php" method="POST" style="display:inline;">
-                <input type="hidden" name="action" value="approve_featured">
-                <input type="hidden" name="request_id" value="<?= $fr['id'] ?>">
-                <button type="submit" class="toggle-btn toggle-on" style="padding:8px 18px;">Approve ✓</button>
-              </form>
-              <form action="admin_action.php" method="POST" style="display:inline;" onsubmit="return confirm('Reject this request? The provider has already paid.');">
-                <input type="hidden" name="action" value="reject_featured">
-                <input type="hidden" name="request_id" value="<?= $fr['id'] ?>">
-                <button type="submit" class="toggle-btn" style="background:#991b1b;color:#fff;padding:8px 18px;">Reject ✗</button>
-              </form>
-            </div>
-          </div>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-
-        <?php if (!empty($unpaidPending)): ?>
-        <div class="section-card">
-          <h3>💳 Awaiting Payment (<?= count($unpaidPending) ?>)</h3>
-          <?php foreach ($unpaidPending as $fr): ?>
-          <div style="background:var(--cream);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
-            <div>
-              <p style="font-weight:600;"><?= htmlspecialchars($fr['full_name']) ?> — <?= htmlspecialchars($fr['service_category']) ?></p>
-              <p style="font-size:0.8rem;color:var(--sand);"><?= $fr['duration_days'] ?> days · GH₵ <?= number_format($fr['fee'], 2) ?> · Not yet paid</p>
-            </div>
-            <span class="status-badge status-pending">Unpaid</span>
-          </div>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-
-        <?php if (!empty($processed)): ?>
-        <div class="section-card">
-          <h3>History</h3>
-          <table class="data-table">
-            <thead>
-              <tr><th>Provider</th><th>Category</th><th>Plan</th><th>Fee</th><th>Payment</th><th>Status</th><th>Date</th></tr>
-            </thead>
-            <tbody>
-              <?php foreach ($processed as $fr): ?>
-              <tr>
-                <td style="font-weight:600;color:var(--bark);"><?= htmlspecialchars($fr['full_name']) ?></td>
-                <td><?= htmlspecialchars($fr['service_category']) ?></td>
-                <td><?= $fr['duration_days'] ?> days</td>
-                <td>GH₵ <?= number_format($fr['fee'], 2) ?></td>
-                <td><span class="status-badge status-<?= $fr['payment_status'] ?>"><?= ucfirst($fr['payment_status']) ?></span></td>
-                <td><span class="status-badge status-<?= $fr['request_status'] === 'approved' ? 'accepted' : ($fr['request_status'] === 'rejected' ? 'cancelled' : 'pending') ?>"><?= ucfirst($fr['request_status']) ?></span></td>
-                <td><?= date('j M Y', strtotime($fr['created_at'])) ?></td>
-              </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        </div>
-        <?php endif; ?>
-
-        <?php if (empty($featuredRequests)): ?>
-        <div class="section-card"><p>No featured listing requests yet. Providers can request from their dashboard.</p></div>
-        <?php endif; ?>
-      </div>
-
-      <!-- ════ VERIFICATION ════ -->
-      <div id="verification-admin" class="admin-panel">
-        <h2 style="font-family:'Sora',sans-serif;font-size:1.9rem;font-weight:800;letter-spacing:-0.04em;margin-bottom:6px;">Provider Verification</h2>
-        <p style="color:var(--sand);margin-bottom:36px;">Review identity documents and approve providers for the verified badge.</p>
-
-        <?php
-        $pendingVerifications = array_filter($verificationRequests, fn($v) => $v['status'] === 'pending');
-        $processedVerifications = array_filter($verificationRequests, fn($v) => $v['status'] !== 'pending');
-        $idTypeLabels = ['ghana_card' => 'Ghana Card', 'passport' => 'Passport', 'voters_id' => "Voter's ID", 'drivers_license' => "Driver's License", 'nhis' => 'NHIS Card'];
-        ?>
-
-        <?php if (!empty($pendingVerifications)): ?>
-        <div class="section-card" style="border-left:3px solid var(--ember);">
-          <h3>⏳ Pending Review (<?= count($pendingVerifications) ?>)</h3>
-          <?php foreach ($pendingVerifications as $vr): ?>
-          <div style="background:var(--cream);border:1px solid var(--border);border-radius:10px;padding:24px;margin-bottom:16px;">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
-              <div>
-                <p style="font-weight:700;color:var(--bark);font-size:1.05rem;"><?= htmlspecialchars($vr['full_name']) ?></p>
-                <p style="font-size:0.82rem;color:var(--ember);font-weight:600;"><?= htmlspecialchars($vr['service_category']) ?> · ★ <?= number_format($vr['rating'], 1) ?> · <?= $vr['experience_years'] ?> yrs</p>
-                <p style="font-size:0.78rem;color:var(--sand);margin-top:4px;">Submitted: <?= date('j M Y, g:i A', strtotime($vr['created_at'])) ?></p>
-              </div>
-            </div>
-
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-              <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-                <p style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sand);margin-bottom:6px;">ID Document</p>
-                <p style="font-weight:600;color:var(--bark);"><?= $idTypeLabels[$vr['id_type']] ?? $vr['id_type'] ?></p>
-                <p style="font-size:0.85rem;color:var(--warm-mid);">Number: <?= htmlspecialchars($vr['id_number']) ?></p>
-                <?php if (!empty($vr['document_path'])): ?>
-                  <a href="<?= htmlspecialchars($vr['document_path']) ?>" target="_blank" style="display:inline-block;margin-top:8px;color:var(--ember);font-size:0.82rem;font-weight:600;text-decoration:none;">View Document →</a>
-                <?php endif; ?>
-              </div>
-              <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-                <p style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sand);margin-bottom:6px;">Certificate</p>
-                <?php if (!empty($vr['cert_path'])): ?>
-                  <p style="font-weight:600;color:var(--bark);">Uploaded</p>
-                  <a href="<?= htmlspecialchars($vr['cert_path']) ?>" target="_blank" style="display:inline-block;margin-top:8px;color:var(--ember);font-size:0.82rem;font-weight:600;text-decoration:none;">View Certificate →</a>
-                <?php else: ?>
-                  <p style="color:var(--sand);">Not provided</p>
-                <?php endif; ?>
-              </div>
-            </div>
-
-            <?php
-              $sBadge = smileid_badge($vr['smileid_status'] ?? 'pending');
-              $sChecked = !empty($vr['smileid_checked_at']) ? date('j M Y, g:i A', strtotime($vr['smileid_checked_at'])) : null;
-            ?>
-            <div style="background:#fff;border:1.5px solid <?= $sBadge['fg'] ?>33;border-left:4px solid <?= $sBadge['fg'] ?>;border-radius:8px;padding:14px;margin-bottom:16px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <span style="display:inline-flex;align-items:center;gap:6px;background:<?= $sBadge['bg'] ?>;color:<?= $sBadge['fg'] ?>;padding:5px 12px;border-radius:999px;font-size:0.78rem;font-weight:700;letter-spacing:0.03em;">
-                    <span><?= $sBadge['icon'] ?></span> <?= $sBadge['label'] ?>
-                  </span>
-                  <span style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sand);">Smile ID Partnership</span>
-                </div>
-                <div style="display:flex;gap:10px;align-items:center;">
-                  <?php if ($sChecked): ?>
-                    <span style="font-size:0.72rem;color:var(--sand);">Checked <?= $sChecked ?></span>
-                  <?php endif; ?>
-                  <form action="admin_action.php" method="POST" style="display:inline;">
-                    <input type="hidden" name="action" value="reverify_smileid">
-                    <input type="hidden" name="request_id" value="<?= $vr['id'] ?>">
-                    <button type="submit" style="background:#fff;border:1.5px solid var(--border);color:var(--bark);padding:5px 12px;border-radius:6px;font-size:0.72rem;font-weight:700;cursor:pointer;letter-spacing:0.03em;text-transform:uppercase;">↻ Re-verify</button>
-                  </form>
-                </div>
-              </div>
-              <?php if (!empty($vr['smileid_summary'])): ?>
-                <p style="font-size:0.88rem;color:var(--bark);margin-top:10px;font-weight:500;"><?= htmlspecialchars($vr['smileid_summary']) ?></p>
-              <?php endif; ?>
-              <?php if (!empty($vr['smileid_reference'])): ?>
-                <p style="font-size:0.74rem;color:var(--sand);margin-top:4px;">Smile Job ID: <code style="background:#f3f4f6;padding:1px 6px;border-radius:4px;"><?= htmlspecialchars($vr['smileid_reference']) ?></code></p>
-              <?php endif; ?>
-            </div>
-
-            <?php if (!empty($vr['notes'])): ?>
-              <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
-                <p style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sand);margin-bottom:4px;">Provider Notes</p>
-                <p style="font-size:0.85rem;color:var(--warm-mid);"><?= htmlspecialchars($vr['notes']) ?></p>
-              </div>
-            <?php endif; ?>
-
-            <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
-              <form action="admin_action.php" method="POST" style="display:inline;">
-                <input type="hidden" name="action" value="approve_verification">
-                <input type="hidden" name="request_id" value="<?= $vr['id'] ?>">
-                <button type="submit" class="toggle-btn toggle-on" style="padding:10px 24px;">Approve & Verify ✓</button>
-              </form>
-              <form action="admin_action.php" method="POST" style="display:inline-flex;gap:8px;align-items:flex-end;">
-                <input type="hidden" name="action" value="reject_verification">
-                <input type="hidden" name="request_id" value="<?= $vr['id'] ?>">
-                <div style="display:flex;flex-direction:column;gap:4px;">
-                  <label style="font-size:0.68rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--sand);">Rejection Reason</label>
-                  <input type="text" name="admin_notes" placeholder="e.g. ID photo is blurry" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:6px;font-size:0.82rem;width:250px;">
-                </div>
-                <button type="submit" class="toggle-btn" style="background:#991b1b;color:#fff;padding:10px 18px;">Reject ✗</button>
-              </form>
-            </div>
-          </div>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-
-        <?php if (!empty($processedVerifications)): ?>
-        <div class="section-card">
-          <h3>History</h3>
-          <table class="data-table">
-            <thead>
-              <tr><th>Provider</th><th>Category</th><th>ID Type</th><th>ID Number</th><th>Documents</th><th>Status</th><th>Date</th></tr>
-            </thead>
-            <tbody>
-              <?php foreach ($processedVerifications as $vr): ?>
-              <tr>
-                <td style="font-weight:600;color:var(--bark);"><?= htmlspecialchars($vr['full_name']) ?></td>
-                <td><?= htmlspecialchars($vr['service_category']) ?></td>
-                <td><?= $idTypeLabels[$vr['id_type']] ?? $vr['id_type'] ?></td>
-                <td style="font-size:0.82rem;"><?= htmlspecialchars($vr['id_number']) ?></td>
-                <td>
-                  <?php if (!empty($vr['document_path'])): ?><a href="<?= htmlspecialchars($vr['document_path']) ?>" target="_blank" style="color:var(--ember);font-size:0.78rem;font-weight:600;text-decoration:none;">ID</a><?php endif; ?>
-                  <?php if (!empty($vr['cert_path'])): ?> · <a href="<?= htmlspecialchars($vr['cert_path']) ?>" target="_blank" style="color:var(--ember);font-size:0.78rem;font-weight:600;text-decoration:none;">Cert</a><?php endif; ?>
-                </td>
-                <td><span class="status-badge status-<?= $vr['status'] === 'approved' ? 'accepted' : 'cancelled' ?>"><?= ucfirst($vr['status']) ?></span></td>
-                <td><?= date('j M Y', strtotime($vr['created_at'])) ?></td>
-              </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        </div>
-        <?php endif; ?>
-
-        <?php if (empty($verificationRequests)): ?>
-        <div class="section-card"><p>No verification requests yet.</p></div>
-        <?php endif; ?>
       </div>
 
       <!-- ════ CATEGORIES ════ -->
@@ -1451,6 +1146,8 @@ try {
       const row = document.getElementById('edit-provider-' + id);
       row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
     }
+
+
 
     function toggleEditCat(id) {
       const row = document.getElementById('edit-cat-' + id);
