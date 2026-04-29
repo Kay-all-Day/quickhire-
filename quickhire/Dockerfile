@@ -1,4 +1,4 @@
-FROM dunglas/frankenphp:latest-php8.4
+FROM dunglas/frankenphp:latest
 
 # Install system dependencies and PDO MySQL extension
 RUN apt-get update && apt-get install -y \
