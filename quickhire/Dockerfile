@@ -30,6 +30,3 @@ EXPOSE 8080
 # override the listen address to match Railway's PORT expectation
 ENV SERVER_NAME=":8080"
 
-# Set the document root to the quickhire subdirectory so Apache
-# serves the actual application instead of phpinfo()
-RUN echo "DocumentRoot /var/www/html/quickhire" >> /etc/apache2/apache2.conf
