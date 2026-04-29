@@ -11,12 +11,14 @@ if (!isProvider()) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $user_id          = getUserId();
-    $bio              = trim($_POST['bio'] ?? '');
-    $service_category = trim($_POST['service_category'] ?? '');
-    $experience_years = intval($_POST['experience_years'] ?? 0);
-    $availability     = trim($_POST['availability'] ?? '');
-    $languages        = trim($_POST['languages'] ?? 'English');
-    $avg_response     = trim($_POST['avg_response'] ?? '');
+    $bio               = trim($_POST['bio'] ?? '');
+    $service_category  = trim($_POST['service_category'] ?? '');
+    $experience_years  = intval($_POST['experience_years'] ?? 0);
+    $availability      = trim($_POST['availability'] ?? '');
+    $languages         = trim($_POST['languages'] ?? 'English');
+    $avg_response      = trim($_POST['avg_response'] ?? '');
+    $is_available      = isset($_POST['is_available']) ? 1 : 0;
+    $daily_booking_cap = max(0, intval($_POST['daily_booking_cap'] ?? 0));
 
     if (empty($service_category)) {
         $_SESSION['errors'] = ['Service category is required.'];
@@ -24,11 +26,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $stmt = $pdo->prepare("
-        UPDATE service_providers 
-        SET bio = ?, service_category = ?, experience_years = ?, availability = ?, languages = ?, avg_response = ?
+        UPDATE service_providers
+        SET bio = ?, service_category = ?, experience_years = ?, availability = ?,
+            languages = ?, avg_response = ?, is_available = ?, daily_booking_cap = ?
         WHERE user_id = ?
     ");
-    $stmt->execute([$bio, $service_category, $experience_years, $availability, $languages, $avg_response, $user_id]);
+    $stmt->execute([$bio, $service_category, $experience_years, $availability, $languages, $avg_response, $is_available, $daily_booking_cap, $user_id]);
 
     $_SESSION['success'] = 'Provider profile updated successfully!';
 }

@@ -344,7 +344,7 @@ $idTypeLabels = [
         <div class="section-card">
           <table class="data-table">
             <thead>
-              <tr><th>Provider</th><th>Category</th><th>Rating</th><th>Jobs</th><th>Earned</th><th>Verified</th><th>Featured</th><th>Actions</th></tr>
+              <tr><th>Provider</th><th>Category</th><th>Rating</th><th>Jobs</th><th>Earned</th><th>Cap/day</th><th>Verified</th><th>Featured</th><th>Actions</th></tr>
             </thead>
             <tbody>
               <?php foreach ($allProviders as $p): ?>
@@ -357,6 +357,7 @@ $idTypeLabels = [
                 <td>★ <?= number_format($p['rating'], 1) ?></td>
                 <td><?= $p['job_count'] ?></td>
                 <td>GH₵ <?= number_format($p['total_earned'], 0) ?></td>
+                <td style="color:var(--sand);font-size:0.82rem;"><?= ($p['daily_booking_cap'] ?? 0) > 0 ? (int)$p['daily_booking_cap'] : '∞' ?></td>
                 <td>
                   <form action="admin_action.php" method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="toggle_verified">
@@ -376,7 +377,7 @@ $idTypeLabels = [
                 </td>
               </tr>
               <tr id="edit-provider-<?= $p['provider_id'] ?>" style="display:none;background:var(--parchment);">
-                <td colspan="8">
+                <td colspan="9">
                   <form action="admin_action.php" method="POST" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 0;">
                     <input type="hidden" name="action" value="update_provider">
                     <input type="hidden" name="provider_id" value="<?= $p['provider_id'] ?>">

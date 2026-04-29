@@ -23,18 +23,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($address))      $errors[] = "Please enter your address.";
 
     if (empty($errors)) {
-        // Check provider is verified
-        $stmt = $pdo->prepare("SELECT is_verified FROM service_providers WHERE provider_id = ?");
+        $stmt = $pdo->prepare("SELECT is_verified, is_available, daily_booking_cap FROM service_providers WHERE provider_id = ?");
         $stmt->execute([$provider_id]);
         $prov = $stmt->fetch();
+
         if (!$prov || !$prov['is_verified']) {
             $errors[] = "This provider is not yet verified and cannot accept bookings.";
+        } elseif (!$prov['is_available']) {
+            $errors[] = "This provider is currently not accepting new bookings.";
+        } else {
+            $datetime = $booking_date . ' ' . $booking_time . ':00';
+
+            // Daily cap check
+            $cap = (int)$prov['daily_booking_cap'];
+            if ($cap > 0) {
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM bookings
+                    WHERE provider_id = ? AND DATE(booking_date) = ? AND status != 'cancelled'
+                ");
+                $stmt->execute([$provider_id, $booking_date]);
+                $todayCount = (int)$stmt->fetchColumn();
+                if ($todayCount >= $cap) {
+                    $errors[] = "This provider is fully booked for " . date('j M Y', strtotime($booking_date)) . ". Please choose another date.";
+                }
+            }
+
+            // Time-slot conflict check
+            if (empty($errors)) {
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM bookings
+                    WHERE provider_id = ?
+                      AND DATE(booking_date) = ?
+                      AND HOUR(booking_date) = HOUR(?)
+                      AND status != 'cancelled'
+                ");
+                $stmt->execute([$provider_id, $booking_date, $datetime]);
+                if ((int)$stmt->fetchColumn() > 0) {
+                    $errors[] = "That time slot (" . date('g:i A', strtotime($datetime)) . ") is already booked. Please choose a different time.";
+                }
+            }
         }
     }
 
     if (empty($errors)) {
-        $datetime = $booking_date . ' ' . $booking_time . ':00';
-
         $stmt = $pdo->prepare("
             INSERT INTO bookings (user_id, provider_id, service_id, booking_date, address, notes, status)
             VALUES (?, ?, ?, ?, ?, ?, 'pending')

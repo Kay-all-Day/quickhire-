@@ -1208,8 +1208,31 @@ $msgCount = getUnreadMessages($pdo, $user_id);
                 <label>Avg Response Time</label>
                 <input type="text" name="avg_response" value="<?= htmlspecialchars($providerInfo['avg_response'] ?? '') ?>" placeholder="e.g. 2hr, 30min, Same day">
               </div>
+              <div class="form-field">
+                <label>Daily Booking Limit</label>
+                <input type="number" name="daily_booking_cap" value="<?= intval($providerInfo['daily_booking_cap'] ?? 0) ?>" min="0" max="50" placeholder="0 = unlimited">
+                <p style="font-size:0.72rem;color:var(--sand);margin-top:4px;">Max bookings you'll accept per day. Set to 0 for no limit.</p>
+              </div>
             </div>
-            <button type="submit" class="form-submit" style="max-width:220px;margin-top:8px;">Update Provider Profile →</button>
+            <div class="form-field" style="margin-top:4px;">
+              <style>
+                .avail-toggle { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
+                .avail-toggle input { opacity:0; width:0; height:0; }
+                .avail-track { position:absolute; inset:0; border-radius:24px; background:#ccc; transition:.2s; cursor:pointer; }
+                .avail-track::after { content:''; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:.2s; }
+                .avail-toggle input:checked + .avail-track { background:var(--ember); }
+                .avail-toggle input:checked + .avail-track::after { left:23px; }
+              </style>
+              <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                <span class="avail-toggle">
+                  <input type="checkbox" name="is_available" value="1" <?= ($providerInfo['is_available'] ?? 1) ? 'checked' : '' ?>>
+                  <span class="avail-track"></span>
+                </span>
+                <span style="font-size:0.88rem;font-weight:600;color:var(--bark);">Accept new bookings</span>
+              </label>
+              <p style="font-size:0.72rem;color:var(--sand);margin-top:6px;">Turn off to pause all incoming bookings without losing your profile.</p>
+            </div>
+            <button type="submit" class="form-submit" style="max-width:220px;margin-top:16px;">Update Provider Profile →</button>
           </form>
         </div>
 

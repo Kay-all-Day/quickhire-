@@ -91,7 +91,7 @@ $services = $stmt->fetchAll();
 
         <div class="form-field">
           <label>Service Provider</label>
-          <select name="provider_id" id="providerSelect" onchange="filterServices(); updateSummary();" required>
+          <select name="provider_id" id="providerSelect" onchange="filterServices(); updateSummary(); loadBookedSlots();" required>
             <option value="" disabled <?= !$selected_provider ? 'selected' : '' ?>>Choose a provider…</option>
             <?php foreach ($providers as $p): ?>
               <option value="<?= $p['provider_id'] ?>" data-name="<?= htmlspecialchars($p['full_name']) ?>" data-category="<?= htmlspecialchars($p['service_category']) ?>" data-rating="<?= $p['rating'] ?>" <?= $p['provider_id'] == $selected_provider ? 'selected' : '' ?>>
@@ -111,11 +111,12 @@ $services = $stmt->fetchAll();
         <div class="form-row">
           <div class="form-field">
             <label>Preferred Date</label>
-            <input type="date" name="booking_date" id="bookingDate" required min="<?= date('Y-m-d') ?>" onchange="updateSummary()">
+            <input type="date" name="booking_date" id="bookingDate" required min="<?= date('Y-m-d') ?>" onchange="updateSummary(); loadBookedSlots();">
           </div>
           <div class="form-field">
             <label>Preferred Time</label>
-            <input type="time" name="booking_time" id="bookingTime" required onchange="updateSummary()">
+            <input type="time" name="booking_time" id="bookingTime" required onchange="updateSummary(); checkTimeConflict();">
+            <div id="slot-hint" style="margin-top:6px;font-size:0.78rem;display:none;"></div>
           </div>
         </div>
 
@@ -214,6 +215,51 @@ $services = $stmt->fetchAll();
     }
 
     if (providerSelect.value) filterServices();
+
+    let takenHours = [];
+
+    async function loadBookedSlots() {
+      const pid  = parseInt(providerSelect.value);
+      const date = document.getElementById('bookingDate').value;
+      const hint = document.getElementById('slot-hint');
+      takenHours = [];
+      hint.style.display = 'none';
+      if (!pid || !date) return;
+      try {
+        const res  = await fetch(`api/booked_slots.php?provider_id=${pid}&date=${encodeURIComponent(date)}`);
+        takenHours = await res.json();
+      } catch (_) {}
+      if (takenHours.length > 0) {
+        const labels = takenHours.map(h => {
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          const h12  = h % 12 || 12;
+          return `${h12}:00 ${ampm}`;
+        });
+        hint.innerHTML = `<span style="color:#c2410c;">⚠ Already booked: ${labels.join(', ')}</span>`;
+        hint.style.display = 'block';
+      }
+      checkTimeConflict();
+    }
+
+    function checkTimeConflict() {
+      const timeInput = document.getElementById('bookingTime');
+      const hint      = document.getElementById('slot-hint');
+      const val = timeInput.value;
+      if (!val || takenHours.length === 0) {
+        timeInput.style.borderColor = '';
+        return;
+      }
+      const hour = parseInt(val.split(':')[0], 10);
+      if (takenHours.includes(hour)) {
+        timeInput.style.borderColor = '#ef4444';
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        const h12  = hour % 12 || 12;
+        hint.innerHTML = `<span style="color:#c2410c;">⚠ ${h12}:00 ${ampm} is already booked — pick a different time.</span>`;
+        hint.style.display = 'block';
+      } else {
+        timeInput.style.borderColor = '#22c55e';
+      }
+    }
   </script>
 
 </body>

@@ -63,6 +63,17 @@ if ($satData['total'] > 0) {
 $avgResponse = $p['avg_response'] ?? 'Not set';
 $languages = $p['languages'] ?? 'English';
 
+// Availability / slots-left
+$todayBooked = 0;
+$slotsLeft   = null;
+$cap = (int)($p['daily_booking_cap'] ?? 0);
+$stmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE provider_id = ? AND DATE(booking_date) = CURDATE() AND status != 'cancelled'");
+$stmt->execute([$provider_id]);
+$todayBooked = (int)$stmt->fetchColumn();
+if ($cap > 0) {
+    $slotsLeft = max(0, $cap - $todayBooked);
+}
+
 // Tags from service names
 $tags = array_map(fn($s) => $s['service_name'], $services);
 ?>
@@ -111,17 +122,32 @@ $tags = array_map(fn($s) => $s['service_name'], $services);
           <div class="profile-stat-box"><span class="num"><?= $satisfaction ?></span><span class="lbl">Satisfaction</span></div>
           <div class="profile-stat-box"><span class="num"><?= htmlspecialchars($avgResponse) ?></span><span class="lbl">Avg response</span></div>
         </div>
-        <?php if ($p['is_verified']): ?>
+        <?php if (!$p['is_verified']): ?>
+        <div style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);border-radius:10px;padding:14px;text-align:center;">
+          <p style="font-size:0.82rem;color:#c2410c;font-weight:600;">⚠ This provider is not yet verified</p>
+          <p style="font-size:0.75rem;color:var(--sand);margin-top:4px;">Unverified providers cannot accept bookings</p>
+        </div>
+        <?php elseif (!$p['is_available']): ?>
+        <div style="background:rgba(156,163,175,0.1);border:1px solid rgba(156,163,175,0.3);border-radius:10px;padding:14px;text-align:center;">
+          <p style="font-size:0.82rem;color:var(--warm-mid);font-weight:600;">🔴 Not accepting bookings</p>
+          <p style="font-size:0.75rem;color:var(--sand);margin-top:4px;">This provider is currently unavailable</p>
+        </div>
+        <?php elseif ($slotsLeft !== null && $slotsLeft === 0): ?>
+        <div style="background:rgba(249,115,22,0.06);border:1px solid rgba(249,115,22,0.18);border-radius:10px;padding:14px;text-align:center;">
+          <p style="font-size:0.82rem;color:#c2410c;font-weight:600;">📅 Fully booked today</p>
+          <p style="font-size:0.75rem;color:var(--sand);margin-top:4px;">Check back tomorrow for availability</p>
+        </div>
+        <?php else: ?>
+        <?php if ($slotsLeft !== null): ?>
+        <div style="text-align:center;margin-bottom:10px;padding:8px 14px;background:rgba(5,150,105,0.08);border:1px solid rgba(5,150,105,0.2);border-radius:8px;">
+          <p style="font-size:0.78rem;font-weight:700;color:#065f46;">🟢 <?= $slotsLeft ?> slot<?= $slotsLeft !== 1 ? 's' : '' ?> left today</p>
+        </div>
+        <?php endif; ?>
         <?php if (isLoggedIn()): ?>
         <button class="profile-hire-btn" onclick="window.location='booking.php?provider=<?= $provider_id ?>'">Book <?= htmlspecialchars($firstName) ?> →</button>
         <?php else: ?>
         <button class="profile-hire-btn" onclick="window.location='auth.php?redirect_to=<?= urlencode('booking.php?provider=' . $provider_id) ?>'">Book <?= htmlspecialchars($firstName) ?> →</button>
         <?php endif; ?>
-        <?php else: ?>
-        <div style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);border-radius:10px;padding:14px;text-align:center;">
-          <p style="font-size:0.82rem;color:#c2410c;font-weight:600;">⚠ This provider is not yet verified</p>
-          <p style="font-size:0.75rem;color:var(--sand);margin-top:4px;">Unverified providers cannot accept bookings</p>
-        </div>
         <?php endif; ?>
         <?php if (isLoggedIn() && getUserId() != $p['user_id']): ?>
         <a href="messages.php?with=<?= $p['user_id'] ?>" style="display:block;text-align:center;padding:12px;background:var(--bark);color:#fff;border-radius:10px;font-size:0.82rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;text-decoration:none;margin-top:10px;transition:all 0.2s;">💬 Message <?= htmlspecialchars($firstName) ?></a>
@@ -135,6 +161,9 @@ $tags = array_map(fn($s) => $s['service_name'], $services);
         <div class="profile-info-row"><span>Experience</span><span><?= $p['experience_years'] ?> Years</span></div>
         <div class="profile-info-row"><span>Languages</span><span><?= htmlspecialchars($languages) ?></span></div>
         <div class="profile-info-row"><span>Availability</span><span><?= htmlspecialchars($p['availability'] ?? 'Mon – Fri') ?></span></div>
+        <?php if ($cap > 0): ?>
+        <div class="profile-info-row"><span>Today's slots</span><span style="font-weight:700;color:<?= $slotsLeft > 0 ? '#065f46' : '#c2410c' ?>;"><?= $slotsLeft ?> / <?= $cap ?> remaining</span></div>
+        <?php endif; ?>
         <div class="profile-info-row"><span>Member since</span><span><?= date('M Y', strtotime($p['joined_at'])) ?></span></div>
       </div>
     </aside>
