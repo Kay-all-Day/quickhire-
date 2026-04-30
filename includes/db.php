@@ -1,4 +1,6 @@
 <?php
+date_default_timezone_set('Africa/Accra');
+
 $host     = getenv('MYSQLHOST')     ?: 'localhost';
 $dbname   = getenv('MYSQLDATABASE') ?: 'quickhire';
 $username = getenv('MYSQLUSER')     ?: 'root';
