@@ -1,5 +1,13 @@
-$host     = 'sql206.infinityfree.com';
-$dbname   = 'if0_41514444_quickhiredb';
-$username = 'if0_41514444';
-$password = 'Ghkofi24'; // click the eye icon to reveal it
-$port     = '3306';
+<?php
+$host     = getenv('MYSQLHOST')     ?: 'localhost';
+$dbname   = getenv('MYSQLDATABASE') ?: 'quickhire';
+$username = getenv('MYSQLUSER')     ?: 'root';
+$password = getenv('MYSQLPASSWORD') ?: '';
+$port     = getenv('MYSQLPORT')     ?: '3306';
+
+try {
+    $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    die("Connection failed: " . $e->getMessage());
+}
