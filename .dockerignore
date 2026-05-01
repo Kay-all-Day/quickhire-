@@ -1,0 +1,8 @@
+.git
+.gitignore
+.claude
+quickhire/
+.env
+*.local.php
+_test_*.php
+_inspect*.php
